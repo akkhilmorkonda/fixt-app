@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useOrganization, useUser } from "@clerk/nextjs";
 import { Icon, type IconName } from "./icons";
 import { SECTIONS, TOP_NAV, isGroup, labelFor, type NavGroup } from "./nav";
@@ -14,8 +14,8 @@ export type Badges = { approvals: number; issues: number; isAdmin?: boolean; wor
 // 16px icons with a 12px gap, 12px section headings and 28px between groups.
 
 const ROW = "flex h-[30px] w-full items-center gap-3 rounded-md px-1 text-sm transition-colors";
-const SHORTCUTS_KEY = "fixt:shortcuts";
-const MAX_SHORTCUTS = 4;
+/** A fixed set, so the list doesn't change as people click around. */
+const SHORTCUTS = ["/drift", "/limits", "/analytics"];
 
 const isActive = (pathname: string, href: string) =>
   href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
@@ -76,28 +76,6 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   return <div className="flex h-[26px] items-center text-xs text-zinc-500">{children}</div>;
 }
 
-// Recently visited pages (outside the top links), remembered per browser.
-function useShortcuts(pathname: string) {
-  const [shortcuts, setShortcuts] = useState<string[]>([]);
-  useEffect(() => {
-    let stored: string[] = [];
-    try {
-      stored = JSON.parse(localStorage.getItem(SHORTCUTS_KEY) ?? "[]");
-    } catch {}
-    const valid = stored.filter((h) => typeof h === "string" && labelFor(h));
-    // Only new pages join (at the top); revisiting one keeps the list in place so it doesn't jump on click.
-    const next =
-      labelFor(pathname) && !TOP_NAV.some((l) => l.href === pathname) && !valid.includes(pathname)
-        ? [pathname, ...valid].slice(0, MAX_SHORTCUTS)
-        : valid;
-    try {
-      localStorage.setItem(SHORTCUTS_KEY, JSON.stringify(next));
-    } catch {}
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reading browser storage after mount
-    setShortcuts(next);
-  }, [pathname]);
-  return shortcuts;
-}
 
 function Workspace({ override }: { override?: string | null }) {
   const { organization } = useOrganization();
@@ -118,7 +96,7 @@ function Workspace({ override }: { override?: string | null }) {
 
 export function SidebarNav({ badges, onNavigate }: { badges: Badges; onNavigate?: () => void }) {
   const pathname = usePathname();
-  const shortcuts = useShortcuts(pathname);
+  const shortcuts = SHORTCUTS.filter((h) => labelFor(h));
 
   return (
     <nav className="flex flex-col gap-7 pb-12" onClick={(e) => (e.target as HTMLElement).closest("a") && onNavigate?.()}>
@@ -132,7 +110,7 @@ export function SidebarNav({ badges, onNavigate }: { badges: Badges; onNavigate?
         <div className="flex flex-col">
           <SectionHeading>Shortcuts</SectionHeading>
           {shortcuts.map((href) => (
-            <NavRow key={href} href={href} label={labelFor(href)!.label} icon="clock" active={pathname === href} />
+            <NavRow key={href} href={href} label={labelFor(href)!.label} icon={labelFor(href)!.icon} active={isActive(pathname, href)} />
           ))}
         </div>
       )}
