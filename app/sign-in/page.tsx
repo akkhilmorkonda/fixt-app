@@ -7,7 +7,7 @@ export default function SignInPage() {
     <AuthShell
       title="Welcome back"
       subtitle="Sign in to your FIXT account."
-      footer={{ text: "New to FIXT? It’s invite-only, so ask your admin for an invitation." }}
+      footer={{ text: "New to FIXT? Continue with Google to create your account." }}
     >
       <Suspense>
         <SignInForm />

@@ -6,8 +6,9 @@ import { useSearchParams } from "next/navigation";
 import { useSignUp } from "@clerk/nextjs";
 import { FormError, PasswordField, SubmitButton, errorMessage, useFinishNavigate } from "./ui";
 
-// FIXT is invite-only (Clerk access mode). An invitation link carries a
-// __clerk_ticket; without one there is nothing to sign up with.
+// New accounts come from Google (the SSO callback creates them; Clerk's
+// sign-up mode must be Public) or from an invitation link, which carries a
+// __clerk_ticket. There's no email-and-password sign-up without one.
 export default function SignUpForm() {
   const ticket = useSearchParams().get("__clerk_ticket");
   const { signUp, errors, fetchStatus } = useSignUp();
@@ -26,8 +27,8 @@ export default function SignUpForm() {
             <path d="m3 7 9 6 9-6" />
           </svg>
           <p className="text-sm leading-6 text-zinc-600">
-            <span className="font-medium text-[#1a1a1a]">FIXT is invite-only.</span> Open the invitation link from your email to create your
-            account.
+            <span className="font-medium text-[#1a1a1a]">Sign up with Google.</span> Use Continue with Google on the sign-in page to create
+            your account, or open the invitation link from your email.
           </p>
         </div>
         <Link
