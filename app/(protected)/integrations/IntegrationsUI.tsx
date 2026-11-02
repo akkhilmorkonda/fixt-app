@@ -3,10 +3,11 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { timeAgo } from "@/lib/fixt/format";
-import { CONNECTOR_KINDS, connectorKindOf, type Connector, type ConnectorKind } from "@/lib/fixt/types";
+import { CONNECTOR_GROUPS, CONNECTOR_KINDS, connectorKindOf, type Connector, type ConnectorKind } from "@/lib/fixt/types";
 import { createConnectorAction, removeConnectorAction, rotateConnectorKeyAction, setConnectorStatusAction, syncConnectorAction, type ActionResult } from "../_actions/fixt";
 import { Icon } from "../_ui/icons";
-import { BUTTON, BUTTON_SECONDARY, BUTTON_SMALL, BUTTON_SMALL_BASE, INPUT, Pill } from "../_ui/kit";
+import { BUTTON, BUTTON_SECONDARY, BUTTON_SMALL, BUTTON_SMALL_BASE, BUTTON_SMALL_DARK, INPUT, Pill } from "../_ui/kit";
+import { ConnectorLogo } from "./logos";
 
 const STATUS_TONE: Record<Connector["status"], string> = {
   connected: "bg-emerald-50 text-emerald-700 ring-emerald-200",
@@ -43,7 +44,7 @@ function KeyReveal({ value, onDone }: { value: string; onDone: () => void }) {
   );
 }
 
-export function AddConnector({ kind: fixedKind, compact }: { kind?: ConnectorKind; compact?: boolean }) {
+export function AddConnector({ kind: fixedKind, compact, again }: { kind?: ConnectorKind; compact?: boolean; again?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<ConnectorKind>(fixedKind ?? "teststand");
@@ -54,6 +55,7 @@ export function AddConnector({ kind: fixedKind, compact }: { kind?: ConnectorKin
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [pending, start] = useTransition();
   const info = connectorKindOf(kind);
+  const account = !!info.preview;
 
   const close = () => {
     setOpen(false);
@@ -66,15 +68,32 @@ export function AddConnector({ kind: fixedKind, compact }: { kind?: ConnectorKin
 
   return (
     <div className="relative">
-      <button type="button" onClick={() => setOpen(true)} className={compact ? BUTTON_SMALL : BUTTON}>
-        <Icon name="plus" className="h-3.5 w-3.5" />
-        {compact ? "Add" : "Add connector"}
-      </button>
+      {compact ? (
+        <button type="button" onClick={() => setOpen(true)} className={`${again ? BUTTON_SMALL : BUTTON_SMALL_DARK} w-full`}>
+          <Icon name="plus" className="h-3.5 w-3.5" />
+          {again ? "Add another" : "Connect"}
+        </button>
+      ) : (
+        <button type="button" onClick={() => setOpen(true)} className={BUTTON}>
+          <Icon name="plus" className="h-3.5 w-3.5" />
+          Add a source
+        </button>
+      )}
       {open && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-zinc-900/20 p-4 pt-[12vh]" role="dialog" aria-modal="true" aria-label="Add connector">
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-zinc-900/20 p-4 pt-[12vh]" role="dialog" aria-modal="true" aria-label={fixedKind ? `Connect ${info.label}` : "Add a source"}>
           <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-5 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-heading text-lg font-semibold">Add connector</h2>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              {fixedKind ? (
+                <div className="flex items-center gap-3">
+                  <ConnectorLogo kind={kind} />
+                  <div>
+                    <h2 className="font-heading text-lg font-semibold leading-tight">Connect {info.label}</h2>
+                    <p className="text-xs leading-5 text-zinc-500">{info.hint}</p>
+                  </div>
+                </div>
+              ) : (
+                <h2 className="font-heading text-lg font-semibold">Add a source</h2>
+              )}
               <button type="button" onClick={close} aria-label="Close" className="rounded-md p-1 text-zinc-500 hover:bg-zinc-100">
                 <Icon name="close" />
               </button>
@@ -97,7 +116,7 @@ export function AddConnector({ kind: fixedKind, compact }: { kind?: ConnectorKin
                     setError(errorOf(r));
                     setFieldErrors(r.ok ? {} : (r.fieldErrors ?? {}));
                     if (!r.ok || !r.value) return;
-                    // Preview connectors have no key to show.
+                    // Account connectors have no key to show.
                     if (r.value.key) setKey(r.value.key);
                     else {
                       close();
@@ -106,20 +125,35 @@ export function AddConnector({ kind: fixedKind, compact }: { kind?: ConnectorKin
                   });
                 }}
               >
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-sm font-medium text-zinc-700">Source</span>
-                  <select value={kind} onChange={(e) => setKind(e.target.value as ConnectorKind)} className={INPUT} disabled={!!fixedKind}>
-                    {CONNECTOR_KINDS.map((k) => (
-                      <option key={k.key} value={k.key}>
-                        {k.label}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-xs text-zinc-500">{info.hint}</span>
-                </label>
+                {!fixedKind && (
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-sm font-medium text-zinc-700">Source</span>
+                    <select
+                      value={kind}
+                      onChange={(e) => {
+                        setKind(e.target.value as ConnectorKind);
+                        setConfig({});
+                        setFieldErrors({});
+                      }}
+                      className={INPUT}
+                    >
+                      {CONNECTOR_GROUPS.map((g) => (
+                        <optgroup key={g.key} label={g.label}>
+                          {CONNECTOR_KINDS.filter((k) => k.group === g.key).map((k) => (
+                            <option key={k.key} value={k.key}>
+                              {k.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                    <span className="text-xs text-zinc-500">{info.hint}</span>
+                  </label>
+                )}
                 <label className="flex flex-col gap-1.5">
                   <span className="text-sm font-medium text-zinc-700">Name</span>
-                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder={info.preview ? info.label : "Fremont TestStand stations"} maxLength={120} className={INPUT} />
+                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder={account ? info.label : `e.g. Fremont ${info.label} stations`} maxLength={120} className={INPUT} />
+                  <span className="text-xs text-zinc-500">How it shows up in FIXT, so your team can tell sources apart.</span>
                 </label>
                 {info.preview?.fields.map((f) => (
                   <label key={f.key} className="flex flex-col gap-1.5">
@@ -128,10 +162,14 @@ export function AddConnector({ kind: fixedKind, compact }: { kind?: ConnectorKin
                     {fieldErrors[f.key] && <span className="text-xs text-rose-600">{fieldErrors[f.key]}</span>}
                   </label>
                 ))}
-                {info.preview && <p className="text-xs leading-5 text-zinc-500">Preview: FIXT simulates this connection&apos;s sync. It doesn&apos;t ask for or store credentials.</p>}
+                {!account && (
+                  <p className="rounded-lg bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600">
+                    FIXT creates a key for this source. Add it to the station&apos;s config and results show up as soon as it posts.
+                  </p>
+                )}
                 {error && <p className="text-sm text-rose-600">{error}</p>}
                 <button type="submit" disabled={pending || !name.trim()} className={BUTTON}>
-                  {pending ? (info.preview ? "Connecting…" : "Creating…") : info.preview ? `Connect ${info.label}` : "Create and get key"}
+                  {pending ? (account ? "Connecting…" : "Creating…") : account ? `Connect ${info.label}` : "Create key"}
                 </button>
               </form>
             )}
@@ -148,7 +186,9 @@ export function ConnectorRow({ connector: c }: { connector: Connector }) {
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [key, setKey] = useState<string | null>(null);
-  const preview = connectorKindOf(c.kind).preview;
+  const info = connectorKindOf(c.kind);
+  const account = info.preview;
+  const settings = account ? account.fields.map((f) => c.config[f.key]).filter(Boolean).join(" / ") : "";
   const act = (fn: () => Promise<ActionResult<unknown>>, after?: (r: ActionResult<unknown>) => void) =>
     start(async () => {
       const r = await fn();
@@ -161,53 +201,62 @@ export function ConnectorRow({ connector: c }: { connector: Connector }) {
 
   return (
     <li className={`flex flex-col gap-2 px-4 py-3 ${pending ? "opacity-60" : ""}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{c.name}</span>
-        <Pill tone={STATUS_TONE[c.status]}>{c.status === "connected" ? "Connected" : c.status === "error" ? "Error" : "Paused"}</Pill>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <ConnectorLogo kind={c.kind} size="sm" />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="truncate text-sm font-medium">{c.name}</span>
+              <Pill tone={STATUS_TONE[c.status]}>{c.status === "connected" ? "Connected" : c.status === "error" ? "Error" : "Paused"}</Pill>
+            </div>
+            <p className="truncate text-xs tabular-nums text-zinc-500">
+              {info.label} · {c.records_synced.toLocaleString()} {account?.unit ?? "records"} · {c.last_sync_at ? `synced ${timeAgo(c.last_sync_at)}` : "never synced"}
+              {settings && ` · ${settings}`}
+              {!account && c.key_prefix && (
+                <>
+                  {" · key "}
+                  <code className="font-mono">{c.key_prefix}…</code>
+                </>
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+          {confirming ? (
+            <span className="flex items-center gap-1.5 text-xs text-zinc-600">
+              {account ? "FIXT stops syncing from it." : "Stations using this key will be refused."}
+              <button type="button" disabled={pending} onClick={() => act(() => removeConnectorAction(c.id))} className="font-medium text-rose-600 hover:underline">
+                Remove
+              </button>
+              <button type="button" onClick={() => setConfirming(false)} className="text-zinc-500 hover:underline">
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <>
+              {account ? (
+                <button type="button" disabled={pending || c.status === "paused"} className={BUTTON_SMALL} onClick={() => act(() => syncConnectorAction(c.id))}>
+                  {pending ? "Syncing…" : "Sync now"}
+                </button>
+              ) : (
+                <button type="button" disabled={pending} className={BUTTON_SMALL} onClick={() => act(() => rotateConnectorKeyAction(c.id), (r) => r.ok && typeof r.value === "string" && setKey(r.value))}>
+                  <Icon name="key" className="h-3.5 w-3.5" />
+                  Rotate key
+                </button>
+              )}
+              <button type="button" disabled={pending} className={BUTTON_SMALL} onClick={() => act(() => setConnectorStatusAction(c.id, c.status === "paused" ? "connected" : "paused"))}>
+                {c.status === "paused" ? "Resume" : "Pause"}
+              </button>
+              <button type="button" disabled={pending} className={`${BUTTON_SMALL_BASE} border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50 hover:text-rose-600`} onClick={() => setConfirming(true)}>
+                Remove
+              </button>
+            </>
+          )}
+        </div>
       </div>
-      <p className="text-xs tabular-nums text-zinc-500">
-        {c.records_synced.toLocaleString()} {preview?.unit ?? "records"} · {c.last_sync_at ? `last sync ${timeAgo(c.last_sync_at)}` : "never synced"}
-        {preview && Object.keys(c.config).length > 0 && ` · ${preview.fields.map((f) => c.config[f.key]).filter(Boolean).join(" / ")}`}
-        {!preview && c.key_prefix && (
-          <>
-            {" · key "}
-            <code className="font-mono">{c.key_prefix}…</code>
-          </>
-        )}
-      </p>
-      {c.last_error && <p className="text-xs text-rose-600">{c.last_error}</p>}
+      {c.last_error && <p className="text-xs text-rose-600 sm:pl-11">{c.last_error}</p>}
       {key && <KeyReveal value={key} onDone={() => setKey(null)} />}
-      <div className="flex flex-wrap gap-1.5">
-        <button type="button" disabled={pending} className={BUTTON_SMALL} onClick={() => act(() => setConnectorStatusAction(c.id, c.status === "paused" ? "connected" : "paused"))}>
-          {c.status === "paused" ? "Resume" : "Pause"}
-        </button>
-        {preview ? (
-          <button type="button" disabled={pending || c.status === "paused"} className={BUTTON_SMALL} onClick={() => act(() => syncConnectorAction(c.id))}>
-            {pending ? "Syncing…" : "Sync now"}
-          </button>
-        ) : (
-          <button type="button" disabled={pending} className={BUTTON_SMALL} onClick={() => act(() => rotateConnectorKeyAction(c.id), (r) => r.ok && typeof r.value === "string" && setKey(r.value))}>
-            <Icon name="key" className="h-3.5 w-3.5" />
-            Rotate key
-          </button>
-        )}
-        {confirming ? (
-          <span className="flex items-center gap-1.5 text-xs text-zinc-600">
-            {preview ? "FIXT stops syncing from it." : "Stations using this key will be refused."}
-            <button type="button" disabled={pending} onClick={() => act(() => removeConnectorAction(c.id))} className="font-medium text-rose-600 hover:underline">
-              Remove
-            </button>
-            <button type="button" onClick={() => setConfirming(false)} className="text-zinc-500 hover:underline">
-              Cancel
-            </button>
-          </span>
-        ) : (
-          <button type="button" disabled={pending} className={`${BUTTON_SMALL_BASE} border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50 hover:text-rose-600`} onClick={() => setConfirming(true)}>
-            Remove
-          </button>
-        )}
-      </div>
-      {error && <p className="text-xs text-rose-600">{error}</p>}
+      {error && <p className="text-xs text-rose-600 sm:pl-11">{error}</p>}
     </li>
   );
 }

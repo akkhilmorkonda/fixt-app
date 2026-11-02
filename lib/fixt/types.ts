@@ -329,37 +329,43 @@ export const ROLES: { key: Role; label: string; hint: string }[] = [
 export type ConnectorField = { key: string; label: string; placeholder: string };
 
 /**
- * Ingest-key connectors post results to /api/ingest. Preview connectors
+ * Ingest-key connectors post results to /api/ingest. Account connectors
  * (`preview`) connect by account instead: FIXT stores only the non-secret
  * settings in `fields` and simulates the sync, for demos.
  */
+export const CONNECTOR_GROUPS: { key: string; label: string; hint: string }[] = [
+  { key: "stations", label: "Test stations", hint: "Where measurements come from. Each station sends its results with a connector key." },
+  { key: "factory", label: "Factory systems", hint: "Who built each unit, with which parts and board revision, so agents can trace a drift to its cause." },
+  { key: "tools", label: "Data, documents & tickets", hint: "Backfill history from your warehouse, give agents specs and reports to cite, and turn investigations into tickets." },
+];
+
 export const CONNECTOR_KINDS: { key: ConnectorKind; label: string; group: string; hint: string; preview?: { fields: ConnectorField[]; unit: string; firstSync: number } }[] = [
-  { key: "teststand", label: "NI TestStand", group: "Test executives", hint: "Result processor plugin posts each UUT report." },
-  { key: "python", label: "Custom Python", group: "Test executives", hint: "pytest / OpenHTF hook or a few lines with requests." },
-  { key: "labview", label: "LabVIEW", group: "Test executives", hint: "HTTP client VI posts results after each run." },
-  { key: "mes", label: "MES", group: "Factory systems", hint: "Unit routing, work orders, operator and shift." },
-  { key: "plm", label: "PLM", group: "Factory systems", hint: "Board revisions, BOMs and ECOs." },
-  { key: "erp", label: "ERP", group: "Factory systems", hint: "Component lots, suppliers and receiving." },
-  { key: "csv", label: "Spreadsheets & CSV", group: "Files", hint: "Upload or drop exports from any tester." },
-  { key: "field_returns", label: "Field returns (RMA)", group: "Factory systems", hint: "Customer returns and failure analysis." },
+  { key: "teststand", label: "NI TestStand", group: "stations", hint: "A result processor posts every UUT report as it finishes." },
+  { key: "python", label: "Python", group: "stations", hint: "A pytest or OpenHTF hook, or a few lines with requests." },
+  { key: "labview", label: "LabVIEW", group: "stations", hint: "An HTTP client VI posts results after each run." },
+  { key: "csv", label: "Spreadsheets & CSV", group: "stations", hint: "Upload exports from any tester, with nothing to install." },
+  { key: "mes", label: "MES", group: "factory", hint: "Unit routing, work orders, operators and shifts." },
+  { key: "plm", label: "PLM", group: "factory", hint: "Board revisions, BOMs and engineering changes." },
+  { key: "erp", label: "ERP", group: "factory", hint: "Component lots, suppliers and receiving." },
+  { key: "field_returns", label: "Field returns (RMA)", group: "factory", hint: "Customer returns and failure analysis results." },
   {
     key: "google_drive",
     label: "Google Drive",
-    group: "Files",
-    hint: "Test specs, fixture drawings and 8D reports the agents can cite.",
+    group: "tools",
+    hint: "Test specs, fixture drawings and 8D reports agents can cite.",
     preview: { fields: [{ key: "folder", label: "Folder", placeholder: "Test engineering / Pulse Band" }], unit: "files", firstSync: 140 },
   },
   {
     key: "onedrive",
     label: "OneDrive & SharePoint",
-    group: "Files",
+    group: "tools",
     hint: "Contract manufacturer reports and work instructions.",
     preview: { fields: [{ key: "folder", label: "Folder or site", placeholder: "Penang CM / Weekly reports" }], unit: "files", firstSync: 60 },
   },
   {
     key: "snowflake",
     label: "Snowflake",
-    group: "Data warehouse",
+    group: "tools",
     hint: "Backfill historical results and write yield and drift tables back.",
     preview: {
       fields: [
@@ -374,8 +380,8 @@ export const CONNECTOR_KINDS: { key: ConnectorKind; label: string; group: string
   {
     key: "jira",
     label: "Jira",
-    group: "Workflow",
-    hint: "Turn investigations into issues and keep their status in sync.",
+    group: "tools",
+    hint: "Open issues from investigations and keep their status in sync.",
     preview: {
       fields: [
         { key: "site", label: "Site", placeholder: "acme.atlassian.net" },
