@@ -722,6 +722,14 @@ async function seed(tenantId: string) {
     conn("erp", "ERP (lots and receiving)", 1_840),
     conn("field_returns", "RMA system", 212),
   ]);
+  // Preview connectors: settings instead of an ingest key.
+  const preview = (kind: string, name: string, synced: number, config: Record<string, string>) => ({ ...conn(kind, name, synced), key_hash: null, key_prefix: null, config });
+  await ins("fx_connectors", [
+    preview("snowflake", "Snowflake (test data warehouse)", 2_418_903, { account: "pulsewear-prod", warehouse: "FIXT_WH", database: "TEST_DATA" }),
+    preview("jira", "Jira (failure analysis)", 37, { site: "pulsewear.atlassian.net", project: "FA" }),
+    preview("google_drive", "Google Drive (test specs)", 146, { folder: "Test engineering / Pulse Band" }),
+    preview("onedrive", "SharePoint (Penang CM reports)", 58, { folder: "Penang CM / Weekly reports" }),
+  ]);
   await ins("fx_handoffs", [
     { line_id: fl1.id, shift: "B", user_id: "demo", author: "Priya Raman", body: "FCT-3 still reading high on HR LED. Pins staged for the swap; don't scrap any HR LED failures from FCT-3, retest them on FCT-1.", created_at: ago(0.4) },
     { line_id: pl1.id, shift: "A", user_id: "demo", author: "Wei Lin", body: "LDO-2241 reels are on hold in the cage. Running LDO-2238 until the 8D comes back. FCT-2 network cable replaced, still not reporting.", created_at: ago(0.2) },

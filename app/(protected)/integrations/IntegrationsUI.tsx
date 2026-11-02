@@ -3,8 +3,8 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { timeAgo } from "@/lib/fixt/format";
-import { CONNECTOR_KINDS, type Connector, type ConnectorKind } from "@/lib/fixt/types";
-import { createConnectorAction, removeConnectorAction, rotateConnectorKeyAction, setConnectorStatusAction, type ActionResult } from "../_actions/fixt";
+import { CONNECTOR_KINDS, connectorKindOf, type Connector, type ConnectorKind } from "@/lib/fixt/types";
+import { createConnectorAction, removeConnectorAction, rotateConnectorKeyAction, setConnectorStatusAction, syncConnectorAction, type ActionResult } from "../_actions/fixt";
 import { Icon } from "../_ui/icons";
 import { BUTTON, BUTTON_SECONDARY, BUTTON_SMALL, BUTTON_SMALL_BASE, INPUT, Pill } from "../_ui/kit";
 
@@ -48,15 +48,20 @@ export function AddConnector({ kind: fixedKind, compact }: { kind?: ConnectorKin
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<ConnectorKind>(fixedKind ?? "teststand");
   const [name, setName] = useState("");
+  const [config, setConfig] = useState<Record<string, string>>({});
   const [key, setKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [pending, start] = useTransition();
+  const info = connectorKindOf(kind);
 
   const close = () => {
     setOpen(false);
     setKey(null);
     setName("");
+    setConfig({});
     setError(null);
+    setFieldErrors({});
   };
 
   return (
@@ -88,9 +93,16 @@ export function AddConnector({ kind: fixedKind, compact }: { kind?: ConnectorKin
                 onSubmit={(e) => {
                   e.preventDefault();
                   start(async () => {
-                    const r = await createConnectorAction(kind, name);
+                    const r = await createConnectorAction(kind, name, config);
                     setError(errorOf(r));
-                    if (r.ok && r.value) setKey(r.value.key);
+                    setFieldErrors(r.ok ? {} : (r.fieldErrors ?? {}));
+                    if (!r.ok || !r.value) return;
+                    // Preview connectors have no key to show.
+                    if (r.value.key) setKey(r.value.key);
+                    else {
+                      close();
+                      router.refresh();
+                    }
                   });
                 }}
               >
@@ -103,15 +115,23 @@ export function AddConnector({ kind: fixedKind, compact }: { kind?: ConnectorKin
                       </option>
                     ))}
                   </select>
-                  <span className="text-xs text-zinc-500">{CONNECTOR_KINDS.find((k) => k.key === kind)?.hint}</span>
+                  <span className="text-xs text-zinc-500">{info.hint}</span>
                 </label>
                 <label className="flex flex-col gap-1.5">
                   <span className="text-sm font-medium text-zinc-700">Name</span>
-                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Fremont TestStand stations" maxLength={120} className={INPUT} />
+                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder={info.preview ? info.label : "Fremont TestStand stations"} maxLength={120} className={INPUT} />
                 </label>
+                {info.preview?.fields.map((f) => (
+                  <label key={f.key} className="flex flex-col gap-1.5">
+                    <span className="text-sm font-medium text-zinc-700">{f.label}</span>
+                    <input value={config[f.key] ?? ""} onChange={(e) => setConfig({ ...config, [f.key]: e.target.value })} placeholder={f.placeholder} maxLength={200} className={INPUT} />
+                    {fieldErrors[f.key] && <span className="text-xs text-rose-600">{fieldErrors[f.key]}</span>}
+                  </label>
+                ))}
+                {info.preview && <p className="text-xs leading-5 text-zinc-500">Preview: FIXT simulates this connection&apos;s sync. It doesn&apos;t ask for or store credentials.</p>}
                 {error && <p className="text-sm text-rose-600">{error}</p>}
                 <button type="submit" disabled={pending || !name.trim()} className={BUTTON}>
-                  {pending ? "Creating…" : "Create and get key"}
+                  {pending ? (info.preview ? "Connecting…" : "Creating…") : info.preview ? `Connect ${info.label}` : "Create and get key"}
                 </button>
               </form>
             )}
@@ -128,6 +148,7 @@ export function ConnectorRow({ connector: c }: { connector: Connector }) {
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [key, setKey] = useState<string | null>(null);
+  const preview = connectorKindOf(c.kind).preview;
   const act = (fn: () => Promise<ActionResult<unknown>>, after?: (r: ActionResult<unknown>) => void) =>
     start(async () => {
       const r = await fn();
@@ -145,8 +166,9 @@ export function ConnectorRow({ connector: c }: { connector: Connector }) {
         <Pill tone={STATUS_TONE[c.status]}>{c.status === "connected" ? "Connected" : c.status === "error" ? "Error" : "Paused"}</Pill>
       </div>
       <p className="text-xs tabular-nums text-zinc-500">
-        {c.records_synced.toLocaleString()} records · {c.last_sync_at ? `last sync ${timeAgo(c.last_sync_at)}` : "never synced"}
-        {c.key_prefix && (
+        {c.records_synced.toLocaleString()} {preview?.unit ?? "records"} · {c.last_sync_at ? `last sync ${timeAgo(c.last_sync_at)}` : "never synced"}
+        {preview && Object.keys(c.config).length > 0 && ` · ${preview.fields.map((f) => c.config[f.key]).filter(Boolean).join(" / ")}`}
+        {!preview && c.key_prefix && (
           <>
             {" · key "}
             <code className="font-mono">{c.key_prefix}…</code>
@@ -159,13 +181,19 @@ export function ConnectorRow({ connector: c }: { connector: Connector }) {
         <button type="button" disabled={pending} className={BUTTON_SMALL} onClick={() => act(() => setConnectorStatusAction(c.id, c.status === "paused" ? "connected" : "paused"))}>
           {c.status === "paused" ? "Resume" : "Pause"}
         </button>
-        <button type="button" disabled={pending} className={BUTTON_SMALL} onClick={() => act(() => rotateConnectorKeyAction(c.id), (r) => r.ok && typeof r.value === "string" && setKey(r.value))}>
-          <Icon name="key" className="h-3.5 w-3.5" />
-          Rotate key
-        </button>
+        {preview ? (
+          <button type="button" disabled={pending || c.status === "paused"} className={BUTTON_SMALL} onClick={() => act(() => syncConnectorAction(c.id))}>
+            {pending ? "Syncing…" : "Sync now"}
+          </button>
+        ) : (
+          <button type="button" disabled={pending} className={BUTTON_SMALL} onClick={() => act(() => rotateConnectorKeyAction(c.id), (r) => r.ok && typeof r.value === "string" && setKey(r.value))}>
+            <Icon name="key" className="h-3.5 w-3.5" />
+            Rotate key
+          </button>
+        )}
         {confirming ? (
           <span className="flex items-center gap-1.5 text-xs text-zinc-600">
-            Stations using this key will be refused.
+            {preview ? "FIXT stops syncing from it." : "Stations using this key will be refused."}
             <button type="button" disabled={pending} onClick={() => act(() => removeConnectorAction(c.id))} className="font-medium text-rose-600 hover:underline">
               Remove
             </button>

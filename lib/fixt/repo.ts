@@ -6,7 +6,9 @@ import { currentTenant } from "@/lib/tenant";
 import { isoDay } from "./format";
 import {
   DEFAULT_SETTINGS,
+  CONNECTOR_KINDS,
   LINE_CHANGING,
+  connectorKindOf,
   type AgentAction,
   type AgentLogEntry,
   type Alert,
@@ -695,7 +697,7 @@ export async function addHandoff(lineId: string, shift: Handoff["shift"], body: 
 export async function listConnectors(): Promise<Connector[]> {
   const { tenantId, db } = await ctx();
   const rows = must(
-    await db.from("fx_connectors").select("id, kind, name, status, last_sync_at, records_synced, last_error, key_prefix, created_at").eq("tenant_id", tenantId).order("created_at").returns<Connector[]>(),
+    await db.from("fx_connectors").select("id, kind, name, status, last_sync_at, records_synced, last_error, key_prefix, config, created_at").eq("tenant_id", tenantId).order("created_at").returns<Connector[]>(),
     "load connectors",
   );
   return (rows ?? []).map((r) => num(r, ["records_synced"]));
@@ -703,21 +705,61 @@ export async function listConnectors(): Promise<Connector[]> {
 
 export const hashKey = (key: string) => createHash("sha256").update(key).digest("hex");
 
-/** Creates a connector and its ingest key. The key is returned once and only its hash is kept. */
-export async function createConnector(kind: Connector["kind"], name: string) {
+/** A random 5 to 15% of n (at least 1), so simulated sync counts don't look canned. */
+const previewDelta = (firstSync: number) => Math.max(1, Math.round(firstSync * (0.05 + Math.random() * 0.1)));
+
+/**
+ * Creates a connector. An ingest-key connector gets its key, returned once (only
+ * its hash is kept). A preview connector gets no key: it stores its settings and
+ * reports a simulated first sync.
+ */
+export async function createConnector(kind: Connector["kind"], name: string, config: Record<string, string> = {}): Promise<{ id: string; key: string | null }> {
   const { tenantId, db } = await ctx();
-  const key = `fxk_${randomBytes(24).toString("base64url")}`;
+  const preview = connectorKindOf(kind).preview;
+  const key = preview ? null : `fxk_${randomBytes(24).toString("base64url")}`;
   const row = one(
-    await db.from("fx_connectors").insert({ tenant_id: tenantId, kind, name, status: "connected", key_hash: hashKey(key), key_prefix: key.slice(0, 10) }).select("id").single<{ id: string }>(),
+    await db
+      .from("fx_connectors")
+      .insert({
+        tenant_id: tenantId,
+        kind,
+        name,
+        status: "connected",
+        config,
+        ...(key ? { key_hash: hashKey(key), key_prefix: key.slice(0, 10) } : {}),
+        ...(preview ? { last_sync_at: new Date().toISOString(), records_synced: preview.firstSync + previewDelta(preview.firstSync) } : {}),
+      })
+      .select("id")
+      .single<{ id: string }>(),
     "create connector",
   );
   return { id: row.id, key };
 }
 
+/** Simulates a sync on a preview connector: picks up a few new records. Null for other connectors. */
+export async function syncPreviewConnector(id: string) {
+  const { tenantId, db } = await ctx();
+  const { data: c } = await db.from("fx_connectors").select("kind, status, records_synced").eq("tenant_id", tenantId).eq("id", id).maybeSingle<{ kind: string; status: string; records_synced: number }>();
+  const preview = c && connectorKindOf(c.kind).preview;
+  if (!c || !preview) return null;
+  if (c.status === "paused") throw new FixtError("Resume the connector to sync it.");
+  const rows = must(
+    await db
+      .from("fx_connectors")
+      .update({ last_sync_at: new Date().toISOString(), records_synced: Number(c.records_synced) + previewDelta(preview.firstSync / 10), status: "connected", last_error: null })
+      .eq("tenant_id", tenantId)
+      .eq("id", id)
+      .select("id"),
+    "sync connector",
+  );
+  return !!rows?.length;
+}
+
 export async function rotateConnectorKey(id: string) {
   const { tenantId, db } = await ctx();
   const key = `fxk_${randomBytes(24).toString("base64url")}`;
-  const rows = must(await db.from("fx_connectors").update({ key_hash: hashKey(key), key_prefix: key.slice(0, 10) }).eq("tenant_id", tenantId).eq("id", id).select("id"), "rotate key");
+  const ingestKinds = CONNECTOR_KINDS.filter((k) => !k.preview).map((k) => k.key);
+  const rows = must(await db.from("fx_connectors").update({ key_hash: hashKey(key), key_prefix: key.slice(0, 10) }).eq("tenant_id", tenantId).eq("id", id).in("kind", ingestKinds).select("id"), "rotate key");
   return rows?.length ? key : null;
 }
 

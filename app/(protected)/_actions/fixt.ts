@@ -11,7 +11,7 @@ import * as repo from "@/lib/fixt/repo";
 import { emailReady, testChannel } from "@/lib/fixt/notify";
 import { clearFleetData, loadDemoData } from "@/lib/fixt/seed";
 import { AUTONOMY, BRINGUP_STAGES, type Alert, type Investigation, type Severity } from "@/lib/fixt/types";
-import { isConnectorKind, isRole, isSeverity, isShift, isUuid, parseBringup, parseChannel, parseComment, parseSettings } from "@/lib/fixt/validate";
+import { isConnectorKind, isRole, isSeverity, isShift, isUuid, parseBringup, parseChannel, parseComment, parseConnectorConfig, parseSettings } from "@/lib/fixt/validate";
 import { currentTenant } from "@/lib/tenant";
 
 // Server actions for every FIXT page. Each one checks the session first;
@@ -242,13 +242,23 @@ export async function addHandoffAction(lineId: unknown, shift: unknown, body: un
 
 // Integrations --------------------------------------------------------------------------
 
-export async function createConnectorAction(kind: unknown, name: unknown) {
+export async function createConnectorAction(kind: unknown, name: unknown, config: unknown = {}) {
   const n = typeof name === "string" ? name.trim().slice(0, 120) : "";
   if (!isConnectorKind(kind)) return BAD;
   if (!n) return { ok: false, error: "Name the connector", fieldErrors: { name: "Required" } } satisfies ActionResult;
-  return run<{ id: string; key: string }>(async () => {
+  const parsed = parseConnectorConfig(kind, config);
+  if ("errors" in parsed) return { ok: false, error: "Check the highlighted fields", fieldErrors: parsed.errors } satisfies ActionResult;
+  return run<{ id: string; key: string | null }>(async () => {
     await requireOrgAdmin();
-    return repo.createConnector(kind, n);
+    return repo.createConnector(kind, n, parsed.fields);
+  });
+}
+
+export async function syncConnectorAction(id: unknown) {
+  if (!isUuid(id)) return BAD;
+  return run(async () => {
+    await requireOrgAdmin();
+    return repo.syncPreviewConnector(id);
   });
 }
 

@@ -11,7 +11,7 @@ export type ActionKind = "recalibrate" | "change_limit" | "update_sequence" | "r
 export type AlertKind = "drift" | "anomaly" | "false_failure" | "calibration" | "offline" | "yield";
 export type Shift = "A" | "B" | "C";
 export type Role = "test_engineer" | "quality" | "manufacturing_lead" | "cm_partner";
-export type ConnectorKind = "teststand" | "python" | "labview" | "mes" | "plm" | "erp" | "csv" | "field_returns";
+export type ConnectorKind = "teststand" | "python" | "labview" | "mes" | "plm" | "erp" | "csv" | "field_returns" | "snowflake" | "jira" | "google_drive" | "onedrive";
 export type ChannelKind = "slack" | "teams" | "email" | "pagerduty";
 export type BringupStage = "first_article" | "evt" | "dvt" | "pvt" | "production_ready";
 
@@ -191,6 +191,8 @@ export type Connector = {
   records_synced: number;
   last_error: string | null;
   key_prefix: string | null;
+  /** Account settings for preview connectors (see CONNECTOR_KINDS fields); empty for ingest-key ones. */
+  config: Record<string, string>;
   created_at: string;
 };
 
@@ -324,7 +326,14 @@ export const ROLES: { key: Role; label: string; hint: string }[] = [
   { key: "cm_partner", label: "Contract manufacturer", hint: "Only investigations shared with them." },
 ];
 
-export const CONNECTOR_KINDS: { key: ConnectorKind; label: string; group: string; hint: string }[] = [
+export type ConnectorField = { key: string; label: string; placeholder: string };
+
+/**
+ * Ingest-key connectors post results to /api/ingest. Preview connectors
+ * (`preview`) connect by account instead: FIXT stores only the non-secret
+ * settings in `fields` and simulates the sync, for demos.
+ */
+export const CONNECTOR_KINDS: { key: ConnectorKind; label: string; group: string; hint: string; preview?: { fields: ConnectorField[]; unit: string; firstSync: number } }[] = [
   { key: "teststand", label: "NI TestStand", group: "Test executives", hint: "Result processor plugin posts each UUT report." },
   { key: "python", label: "Custom Python", group: "Test executives", hint: "pytest / OpenHTF hook or a few lines with requests." },
   { key: "labview", label: "LabVIEW", group: "Test executives", hint: "HTTP client VI posts results after each run." },
@@ -333,8 +342,51 @@ export const CONNECTOR_KINDS: { key: ConnectorKind; label: string; group: string
   { key: "erp", label: "ERP", group: "Factory systems", hint: "Component lots, suppliers and receiving." },
   { key: "csv", label: "Spreadsheets & CSV", group: "Files", hint: "Upload or drop exports from any tester." },
   { key: "field_returns", label: "Field returns (RMA)", group: "Factory systems", hint: "Customer returns and failure analysis." },
+  {
+    key: "google_drive",
+    label: "Google Drive",
+    group: "Files",
+    hint: "Test specs, fixture drawings and 8D reports the agents can cite.",
+    preview: { fields: [{ key: "folder", label: "Folder", placeholder: "Test engineering / Pulse Band" }], unit: "files", firstSync: 140 },
+  },
+  {
+    key: "onedrive",
+    label: "OneDrive & SharePoint",
+    group: "Files",
+    hint: "Contract manufacturer reports and work instructions.",
+    preview: { fields: [{ key: "folder", label: "Folder or site", placeholder: "Penang CM / Weekly reports" }], unit: "files", firstSync: 60 },
+  },
+  {
+    key: "snowflake",
+    label: "Snowflake",
+    group: "Data warehouse",
+    hint: "Backfill historical results and write yield and drift tables back.",
+    preview: {
+      fields: [
+        { key: "account", label: "Account", placeholder: "acme-xy12345" },
+        { key: "warehouse", label: "Warehouse", placeholder: "FIXT_WH" },
+        { key: "database", label: "Database", placeholder: "TEST_DATA" },
+      ],
+      unit: "rows",
+      firstSync: 1_200_000,
+    },
+  },
+  {
+    key: "jira",
+    label: "Jira",
+    group: "Workflow",
+    hint: "Turn investigations into issues and keep their status in sync.",
+    preview: {
+      fields: [
+        { key: "site", label: "Site", placeholder: "acme.atlassian.net" },
+        { key: "project", label: "Project key", placeholder: "FA" },
+      ],
+      unit: "issues",
+      firstSync: 30,
+    },
+  },
 ];
-export const connectorKindOf = (k: string) => CONNECTOR_KINDS.find((x) => x.key === k) ?? CONNECTOR_KINDS[6];
+export const connectorKindOf = (k: string) => CONNECTOR_KINDS.find((x) => x.key === k) ?? CONNECTOR_KINDS.find((x) => x.key === "csv")!;
 
 export const CHANNEL_KINDS: { key: ChannelKind; label: string; placeholder: string }[] = [
   { key: "slack", label: "Slack", placeholder: "https://hooks.slack.com/services/…" },

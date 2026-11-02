@@ -1,7 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { listConnectors } from "@/lib/fixt/repo";
 import { CONNECTOR_KINDS } from "@/lib/fixt/types";
-import { Card } from "../_ui/kit";
+import { Card, Pill } from "../_ui/kit";
 import PageHeader from "../_ui/PageHeader";
 import { AddConnector, ConnectorRow, CsvUpload, SetupDocs } from "./IntegrationsUI";
 
@@ -31,7 +31,10 @@ export default async function IntegrationsPage() {
                     <div key={kind.key} className="flex flex-col rounded-xl border border-zinc-200 bg-white">
                       <div className="flex items-start justify-between gap-3 border-b border-zinc-100 bg-[#fcfcfc] px-4 py-2.5">
                         <div className="min-w-0">
-                          <h3 className="font-heading text-[15px] font-semibold tracking-tight">{kind.label}</h3>
+                          <h3 className="flex items-center gap-2 font-heading text-[15px] font-semibold tracking-tight">
+                            {kind.label}
+                            {kind.preview && <Pill tone="bg-sky-50 text-sky-700 ring-sky-200">Preview</Pill>}
+                          </h3>
                           <p className="text-xs leading-5 text-zinc-500">{kind.hint}</p>
                         </div>
                         <AddConnector kind={kind.key} compact />

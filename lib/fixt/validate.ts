@@ -18,6 +18,21 @@ export const isRole = (v: unknown): v is Role => ROLES.some((r) => r.key === v);
 export const isConnectorKind = (v: unknown): v is ConnectorKind => CONNECTOR_KINDS.some((c) => c.key === v);
 export const isShift = (v: unknown): v is "A" | "B" | "C" => v === "A" || v === "B" || v === "C";
 
+/** A preview connector's settings: only its declared fields, all required. Ingest-key connectors take none. */
+export function parseConnectorConfig(kind: ConnectorKind, input: unknown): Result<Record<string, string>> {
+  const fields = CONNECTOR_KINDS.find((c) => c.key === kind)?.preview?.fields ?? [];
+  const o = (input ?? {}) as Record<string, unknown>;
+  const config: Record<string, string> = {};
+  const errors: Record<string, string> = {};
+  for (const f of fields) {
+    const v = text(o[f.key], 200);
+    if (v === null) errors[f.key] = "Too long";
+    else if (!v) errors[f.key] = "Required";
+    else config[f.key] = v;
+  }
+  return Object.keys(errors).length ? { errors } : { fields: config };
+}
+
 export function parseComment(v: unknown) {
   const s = text(v, 4000);
   return s ? s : null;

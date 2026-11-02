@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { csvToResults, parseChannel, parseIngest, parseSettings } from "@/lib/fixt/validate";
+import { csvToResults, parseChannel, parseConnectorConfig, parseIngest, parseSettings } from "@/lib/fixt/validate";
 
 describe("ingest validation", () => {
   it("accepts an array or {results}, and reports bad rows by index", () => {
@@ -52,5 +52,17 @@ describe("settings validation", () => {
   it("needs recipients when the summary is on, and a positive baseline", () => {
     expect(parseSettings({ ...base, weekly_summary_enabled: "on" })).toHaveProperty("errors.weekly_summary_to");
     expect(parseSettings({ ...base, baseline_root_cause_hours: "0" })).toHaveProperty("errors.baseline_root_cause_hours");
+  });
+});
+
+describe("connector config", () => {
+  it("keeps only a preview connector's declared fields, all required", () => {
+    expect(parseConnectorConfig("jira", { site: " acme.atlassian.net ", project: "FA", token: "secret" })).toEqual({ fields: { site: "acme.atlassian.net", project: "FA" } });
+    expect(parseConnectorConfig("jira", { site: "acme.atlassian.net" })).toHaveProperty("errors.project", "Required");
+    expect(parseConnectorConfig("snowflake", { account: "a".repeat(201), warehouse: "W", database: "D" })).toHaveProperty("errors.account", "Too long");
+  });
+
+  it("takes no settings for ingest-key connectors", () => {
+    expect(parseConnectorConfig("teststand", { anything: "x" })).toEqual({ fields: {} });
   });
 });
