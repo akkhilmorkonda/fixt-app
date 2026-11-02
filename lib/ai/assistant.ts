@@ -4,7 +4,8 @@ import { createAgent, modelCallLimitMiddleware, toolCallLimitMiddleware, anthrop
 import type { BaseMessage } from "@langchain/core/messages";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 import { currentTenant } from "@/lib/tenant";
-import { getFleet, getStation, getYield, listActions, listAlerts, listFailures, listInvestigations, listLots } from "@/lib/fixt/repo";
+import { getFleet, getStation, getYield, listActions, listAlerts, listFailures, listInvestigations, listLots, listTestSeries } from "@/lib/fixt/repo";
+import { analyzeTest, VERDICTS } from "@/lib/fixt/capability";
 import { classificationOf } from "@/lib/fixt/types";
 import { costOfQuality, falseFailureStats, lotQuality, pareto, summarizeYield } from "@/lib/fixt/metrics";
 import { cpk, mean } from "@/lib/fixt/spc";
@@ -200,7 +201,46 @@ const pendingApprovals = tool(
   },
 );
 
-const TOOLS = [fleetStatus, stationDetails, findAlerts, findInvestigations, investigationDetails, quality, pendingApprovals];
+const testCapability = tool(
+  async () => {
+    const series = await listTestSeries(200);
+    const analyzed = series.map((s) => ({ s, a: analyzeTest(s.samples.map((m) => m.value), { lsl: s.test.lsl, usl: s.test.usl }, { mean: s.test.baseline_mean, sd: s.test.baseline_sd }) }));
+    // Most serious first, so the model reads the problems before the capable tests.
+    analyzed.sort((x, y) => VERDICTS[y.a.assessment.verdict].rank - VERDICTS[x.a.assessment.verdict].rank || (x.a.capability.ppk ?? 99) - (y.a.capability.ppk ?? 99));
+    const rows = analyzed.map(({ s, a }) => {
+      const c = a.capability;
+      return {
+        test: s.test.name,
+        station: s.station.name,
+        link: `/limits/${s.test.id}`,
+        unit: s.test.unit,
+        lsl: s.test.lsl,
+        usl: s.test.usl,
+        results: c.n,
+        mean: c.n ? r3(c.mean) : null,
+        sd: c.n > 1 ? r3(c.sd) : null,
+        cpk: c.cpk == null ? null : r3(c.cpk),
+        ppk: c.ppk == null ? null : r3(c.ppk),
+        expected_ppm: Math.round(c.ppm.total * 10) / 10,
+        observed_fail_rate: r3(c.observed.rate),
+        normal: c.normality.normal,
+        control_signals: a.signals.length,
+        assessment: VERDICTS[a.assessment.verdict].label,
+        summary: a.assessment.summary,
+        suggested_limits: a.assessment.suggestion,
+      };
+    });
+    return JSON.stringify(rows);
+  },
+  {
+    name: "test_capability",
+    description:
+      "Every test's process capability from its latest 200 results: Cpk (short-term), Ppk (long-term), expected ppm outside limits, normality, control-rule signals, and FIXT's assessment (Unstable, Limits too tight, Off center, Marginal, Capable, Limits loose, No limits) with suggested limits where moving them is the right fix. Use for questions about limits, capability, guard-banding or which limits to tune. Each row has a /limits/<id> link to the tuning page.",
+    schema: z.object({}),
+  },
+);
+
+const TOOLS = [fleetStatus, stationDetails, findAlerts, findInvestigations, investigationDetails, quality, pendingApprovals, testCapability];
 
 // Conversations -------------------------------------------------------------------------
 

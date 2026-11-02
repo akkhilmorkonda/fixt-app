@@ -40,6 +40,7 @@ export const SECTIONS: NavSection[] = [
   {
     title: "Engineering",
     items: [
+      { href: "/limits", label: "Limits & capability", icon: "capability" },
       { href: "/bringup", label: "Bring-up", icon: "bringup" },
       { href: "/handoffs", label: "Shift handoffs", icon: "handoff" },
     ],

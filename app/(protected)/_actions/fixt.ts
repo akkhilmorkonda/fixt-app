@@ -11,7 +11,7 @@ import * as repo from "@/lib/fixt/repo";
 import { emailReady, testChannel } from "@/lib/fixt/notify";
 import { clearFleetData, loadDemoData } from "@/lib/fixt/seed";
 import { AUTONOMY, BRINGUP_STAGES, type Alert, type Investigation, type Severity } from "@/lib/fixt/types";
-import { isConnectorKind, isRole, isSeverity, isShift, isUuid, parseBringup, parseChannel, parseComment, parseConnectorConfig, parseSettings } from "@/lib/fixt/validate";
+import { isConnectorKind, isRole, isSeverity, isShift, isUuid, parseBringup, parseChannel, parseComment, parseConnectorConfig, parseLimits, parseSettings } from "@/lib/fixt/validate";
 import { currentTenant } from "@/lib/tenant";
 
 // Server actions for every FIXT page. Each one checks the session first;
@@ -66,6 +66,20 @@ export async function clearFleetAction(confirm: unknown) {
     await requireOrgAdmin();
     await clearFleetData();
     return true;
+  });
+}
+
+// Limits --------------------------------------------------------------------------------
+
+/** Sends new limits for a test to Approvals; nothing changes on the line until someone approves. */
+export async function proposeLimitsAction(testId: unknown, input: unknown): Promise<ActionResult<string>> {
+  if (!isUuid(testId)) return BAD;
+  const parsed = parseLimits(input);
+  if ("errors" in parsed) return { ok: false, error: "Check the limits", fieldErrors: parsed.errors };
+  const { lsl, usl, rationale } = parsed.fields;
+  return run(async () => {
+    await requireEditor();
+    return repo.proposeLimitChange(testId, { lsl, usl }, rationale);
   });
 }
 

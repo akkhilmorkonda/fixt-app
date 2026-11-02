@@ -33,6 +33,28 @@ export function parseConnectorConfig(kind: ConnectorKind, input: unknown): Resul
   return Object.keys(errors).length ? { errors } : { fields: config };
 }
 
+/** Proposed test limits: each a finite number or empty, at least one set, lower below upper. */
+export function parseLimits(input: unknown): Result<{ lsl: number | null; usl: number | null; rationale: string | null }> {
+  const o = (input ?? {}) as Record<string, unknown>;
+  const errors: Record<string, string> = {};
+  const limit = (key: "lsl" | "usl") => {
+    const v = o[key];
+    if (v == null || v === "") return null;
+    const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+    if (!Number.isFinite(n) || Math.abs(n) > 1e12) errors[key] = "Enter a number";
+    return n;
+  };
+  const lsl = limit("lsl");
+  const usl = limit("usl");
+  if (!errors.lsl && !errors.usl) {
+    if (lsl == null && usl == null) errors.usl = "Set at least one limit";
+    else if (lsl != null && usl != null && lsl >= usl) errors.usl = "Must be above the lower limit";
+  }
+  const rationale = text(o.rationale, 1000);
+  if (rationale === null) errors.rationale = "Too long";
+  return Object.keys(errors).length ? { errors } : { fields: { lsl, usl, rationale: rationale || null } };
+}
+
 export function parseComment(v: unknown) {
   const s = text(v, 4000);
   return s ? s : null;

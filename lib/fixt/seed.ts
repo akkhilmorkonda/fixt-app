@@ -41,12 +41,14 @@ const TESTS: Record<string, TestSpec[]> = {
   ],
   fct: [
     { name: "HR LED drive current", unit: "mA", nominal: 20, sd: 0.35, lsl: 18, usl: 22 },
-    { name: "Accelerometer self-test", unit: "g", nominal: 1.0, sd: 0.015, lsl: 0.9, usl: 1.1 },
+    // Limits set tighter than the part needs, so some good units fail: the limit-tuning example.
+    { name: "Accelerometer self-test", unit: "g", nominal: 1.0, sd: 0.015, lsl: 0.965, usl: 1.035 },
     { name: "Charge current", unit: "mA", nominal: 450, sd: 6, lsl: 420, usl: 480 },
   ],
   rf: [
     { name: "BLE TX power", unit: "dBm", nominal: 4, sd: 0.25, lsl: 2, usl: 6 },
-    { name: "Crystal frequency offset", unit: "kHz", nominal: 0, sd: 6, lsl: -40, usl: 40 },
+    // Limits far wider than the spread, so a real shift would still pass.
+    { name: "Crystal frequency offset", unit: "kHz", nominal: 0, sd: 6, lsl: -70, usl: 70 },
   ],
   eol: [
     { name: "Standby current", unit: "µA", nominal: 15, sd: 1.6, lsl: null, usl: 22 },
@@ -197,6 +199,8 @@ async function seed(tenantId: string) {
       // Standby current: a settling-time problem, so some good units read high on the first try.
       const flaky = station.id === falseFail.id && t.name === "Standby current" && r.next() < 0.11;
       if (flaky) v = s.usl! + 0.5 + r.next() * 4;
+      // Too-tight limits: good parts (inside 0.9 to 1.1 g) that fail anyway.
+      const tight = t.name === "Accelerometer self-test" && Math.abs(v - 1) <= 0.1;
       const passed = (s.lsl == null || v >= s.lsl) && (s.usl == null || v <= s.usl);
       const serial = `${station.name.slice(0, 4)}${String(100000 + i * 37 + r.int(0, 36)).slice(-6)}`;
       const lotCode = t.name === "VBAT rail" ? (at > lotChange && station.id === lotStation.id ? "LDO-2241" : "LDO-2238") : t.name.includes("Battery") ? (at > now - 8 * DAY ? "CELL-1002" : "CELL-0917") : null;
@@ -212,11 +216,11 @@ async function seed(tenantId: string) {
           mode: `${t.name} ${s.usl != null && v > s.usl ? "high" : "low"}`,
           shift: shiftOf(at),
           board_rev: "C",
-          retest_passed: flaky ? r.next() < 0.92 : r.next() < 0.15,
-          false_failure: flaky,
+          retest_passed: flaky ? r.next() < 0.92 : tight ? r.next() < 0.4 : r.next() < 0.15,
+          false_failure: flaky || tight,
           escaped: false,
-          scrap_cost: flaky ? 0 : 38,
-          rework_minutes: flaky ? 0 : r.int(15, 45),
+          scrap_cost: flaky || tight ? 0 : 38,
+          rework_minutes: flaky || tight ? 0 : r.int(15, 45),
           retest_minutes: r.int(3, 8),
         });
       }

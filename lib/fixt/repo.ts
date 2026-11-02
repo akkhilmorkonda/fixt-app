@@ -510,6 +510,12 @@ async function writeChange(db: ReturnType<typeof createAdminSupabase>, tenantId:
   const today = new Date();
   switch (a.kind) {
     case "change_limit": {
+      // Both limits at once, from limit tuning.
+      if (c.field === "limits" && a.test_id) {
+        const v = (value ?? {}) as { lsl?: number | null; usl?: number | null };
+        must(await db.from("fx_tests").update({ lsl: v.lsl ?? null, usl: v.usl ?? null }).eq("tenant_id", tenantId).eq("id", a.test_id), "change limits");
+        return;
+      }
       if ((c.field !== "lsl" && c.field !== "usl") || !a.test_id) throw new FixtError("This change has no limit to set");
       must(await db.from("fx_tests").update({ [c.field]: value }).eq("tenant_id", tenantId).eq("id", a.test_id), "change limit");
       return;
@@ -638,6 +644,96 @@ export async function listFailures(days = 30): Promise<Failure[]> {
     if (page.length < 1000) break;
   }
   return rows.map((f) => num(f, ["scrap_cost"]));
+}
+
+// Limits & capability -------------------------------------------------------------------
+
+export type TestSeries = { test: TestDef; station: Station; samples: Measurement[] };
+
+async function latestSamples(db: ReturnType<typeof createAdminSupabase>, tenantId: string, testId: string, limit: number) {
+  const rows = must(
+    await db.from("fx_measurements").select("measured_at, value, passed, serial, shift, board_rev, lot_code").eq("tenant_id", tenantId).eq("test_id", testId).order("measured_at", { ascending: false }).limit(limit).returns<Measurement[]>(),
+    "load measurements",
+  );
+  return (rows ?? []).reverse();
+}
+
+/** Every test with its latest results (oldest first), for the capability overview. */
+export async function listTestSeries(perTest = 200): Promise<TestSeries[]> {
+  const { tenantId, db } = await ctx();
+  const [tests, stations] = await Promise.all([
+    db.from("fx_tests").select(TEST_COLUMNS).eq("tenant_id", tenantId).order("name").returns<TestDef[]>(),
+    db.from("fx_stations").select(STATION_COLUMNS).eq("tenant_id", tenantId).returns<Station[]>(),
+  ]);
+  const byId = new Map((must(stations, "load stations") ?? []).map((s) => [s.id, num(s, ["probe_wear_pct"])]));
+  const rows = (must(tests, "load tests") ?? []).filter((t) => byId.has(t.station_id));
+  return Promise.all(rows.map(async (t) => ({ test: t, station: byId.get(t.station_id)!, samples: await latestSamples(db, tenantId, t.id, perTest) })));
+}
+
+export type TestAnalysis = TestSeries & {
+  line: Line | null;
+  /** The same test on other stations, for station-to-station correlation. */
+  siblings: TestSeries[];
+  actions: AgentAction[];
+};
+
+/** One test in depth: its results, the same test on other stations, and limit changes. */
+export async function getTestAnalysis(testId: string, samples = 500): Promise<TestAnalysis | null> {
+  const { tenantId, db } = await ctx();
+  const test = must(await db.from("fx_tests").select(TEST_COLUMNS).eq("tenant_id", tenantId).eq("id", testId).maybeSingle<TestDef>(), "load test");
+  if (!test) return null;
+  const station = must(await db.from("fx_stations").select(STATION_COLUMNS).eq("tenant_id", tenantId).eq("id", test.station_id).maybeSingle<Station>(), "load station");
+  if (!station) return null;
+  const [line, sibTests, actions, own] = await Promise.all([
+    db.from("fx_lines").select("id, site_id, product_id, name, autonomy").eq("tenant_id", tenantId).eq("id", station.line_id).maybeSingle<Line>(),
+    db.from("fx_tests").select(TEST_COLUMNS).eq("tenant_id", tenantId).eq("name", test.name).neq("id", test.id).limit(8).returns<TestDef[]>(),
+    db.from("fx_actions").select(ACTION_COLUMNS).eq("tenant_id", tenantId).eq("test_id", test.id).order("proposed_at", { ascending: false }).limit(10).returns<AgentAction[]>(),
+    latestSamples(db, tenantId, test.id, samples),
+  ]);
+  const sibs = must(sibTests, "load sibling tests") ?? [];
+  const sibStations = sibs.length
+    ? (must(await db.from("fx_stations").select(STATION_COLUMNS).eq("tenant_id", tenantId).in("id", [...new Set(sibs.map((t) => t.station_id))]).returns<Station[]>(), "load sibling stations") ?? [])
+    : [];
+  const siblings = await Promise.all(
+    sibs
+      .filter((t) => sibStations.some((s) => s.id === t.station_id))
+      .map(async (t) => ({ test: t, station: num(sibStations.find((s) => s.id === t.station_id)!, ["probe_wear_pct"]), samples: await latestSamples(db, tenantId, t.id, 200) })),
+  );
+  return { test, station: num(station, ["probe_wear_pct"]), line: must(line, "load line"), samples: own, siblings: siblings.filter((s) => s.samples.length), actions: must(actions, "load actions") ?? [] };
+}
+
+/**
+ * An engineer's limit change, sent for approval. It's applied only when
+ * someone approves it in Approvals (decideAction), and can be rolled back.
+ */
+export async function proposeLimitChange(testId: string, after: { lsl: number | null; usl: number | null }, rationale: string | null) {
+  const { tenantId, db } = await ctx();
+  const who = await actor();
+  const test = must(await db.from("fx_tests").select(TEST_COLUMNS).eq("tenant_id", tenantId).eq("id", testId).maybeSingle<TestDef>(), "load test");
+  if (!test) return null;
+  if (test.lsl === after.lsl && test.usl === after.usl) throw new FixtError("Those are the current limits.");
+  const waiting = must(await db.from("fx_actions").select("id").eq("tenant_id", tenantId).eq("test_id", testId).eq("kind", "change_limit").eq("status", "proposed").limit(1).returns<{ id: string }[]>(), "check pending changes");
+  if (waiting?.length) throw new FixtError("A limit change for this test is already waiting for approval.");
+  const station = must(await db.from("fx_stations").select("name").eq("tenant_id", tenantId).eq("id", test.station_id).maybeSingle<{ name: string }>(), "load station");
+  const show = (v: number | null) => (v == null ? "none" : String(v));
+  const row = one(
+    await db
+      .from("fx_actions")
+      .insert({
+        tenant_id: tenantId,
+        station_id: test.station_id,
+        test_id: test.id,
+        kind: "change_limit",
+        title: `Set ${test.name} limits on ${station?.name ?? "station"} to ${show(after.lsl)} to ${show(after.usl)} ${test.unit}`.slice(0, 200),
+        rationale: rationale ? `${who.name}: ${rationale}`.slice(0, 2000) : `Proposed by ${who.name} from limit analysis.`,
+        change: { field: "limits", before: { lsl: test.lsl, usl: test.usl }, after },
+      })
+      .select("id")
+      .single<{ id: string }>(),
+    "propose limit change",
+  );
+  await log({ agent: "operator", kind: "asked", message: `${who.name} proposed new limits for ${test.name}: ${show(after.lsl)} to ${show(after.usl)} ${test.unit}`.slice(0, 500), station_id: test.station_id, action_id: row.id, inputs: { before: { lsl: test.lsl, usl: test.usl }, after } });
+  return row.id;
 }
 
 export async function listLots(): Promise<Lot[]> {

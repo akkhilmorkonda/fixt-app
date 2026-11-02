@@ -127,7 +127,12 @@ export default async function StationPage({ params, searchParams }: PageProps<"/
                 />
               </div>
               <div>
-                <h3 className="mb-2 text-xs font-medium uppercase tracking-widest text-zinc-500">Distribution against limits</h3>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h3 className="text-xs font-medium uppercase tracking-widest text-zinc-500">Distribution against limits</h3>
+                  <Link href={`/limits/${current.id}`} className="text-xs font-medium text-sky-700 hover:underline">
+                    Analyze and tune limits
+                  </Link>
+                </div>
                 <Histogram ariaLabel={`${current.name} distribution`} bins={histogram(values, 28)} lsl={current.lsl} usl={current.usl} unit={current.unit} />
               </div>
               <div>

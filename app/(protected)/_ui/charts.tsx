@@ -271,15 +271,38 @@ export function ControlChart({
 
 // Histogram --------------------------------------------------------------------------
 
-/** A measurement distribution with its spec limits. */
-export function Histogram({ bins, lsl, usl, unit, height = 160, ariaLabel }: { bins: { from: number; to: number; count: number }[]; lsl: number | null; usl: number | null; unit: string; height?: number; ariaLabel: string }) {
+const PROPOSED = "#6250d6";
+
+/**
+ * A measurement distribution with its spec limits. Optionally, proposed limits
+ * (dashed) and the normal curve the capability numbers assume.
+ */
+export function Histogram({
+  bins,
+  lsl,
+  usl,
+  unit,
+  height = 160,
+  ariaLabel,
+  proposed,
+  fit,
+}: {
+  bins: { from: number; to: number; count: number }[];
+  lsl: number | null;
+  usl: number | null;
+  unit: string;
+  height?: number;
+  ariaLabel: string;
+  proposed?: { lsl: number | null; usl: number | null } | null;
+  fit?: { mean: number; sd: number } | null;
+}) {
   const [hover, setHover] = useState<number | null>(null);
   const W = 640;
   const H = height;
   const pad = { l: 12, r: 12, t: 10, b: 22 };
   if (!bins.length) return <p className="py-10 text-center text-sm text-zinc-500">No measurements yet.</p>;
-  const lo = Math.min(bins[0].from, lsl ?? Infinity);
-  const hi = Math.max(bins[bins.length - 1].to, usl ?? -Infinity);
+  const lo = Math.min(bins[0].from, lsl ?? Infinity, proposed?.lsl ?? Infinity);
+  const hi = Math.max(bins[bins.length - 1].to, usl ?? -Infinity, proposed?.usl ?? -Infinity);
   const span = hi - lo || 1;
   const x0 = lo - span * 0.04;
   const x1 = hi + span * 0.04;
@@ -287,6 +310,23 @@ export function Histogram({ bins, lsl, usl, unit, height = 160, ariaLabel }: { b
   const max = Math.max(...bins.map((b) => b.count));
   const h = (c: number) => (c / (max || 1)) * (H - pad.t - pad.b);
   const base = H - pad.b;
+  // The normal curve, scaled to expected counts per bin.
+  const width = bins[0].to - bins[0].from;
+  const total = bins.reduce((s, b) => s + b.count, 0);
+  const curve =
+    fit && fit.sd > 0
+      ? Array.from({ length: 81 }, (_, i) => {
+          const v = x0 + ((x1 - x0) * i) / 80;
+          const density = Math.exp(-0.5 * ((v - fit.mean) / fit.sd) ** 2) / (fit.sd * Math.sqrt(2 * Math.PI));
+          return `${x(v)},${base - Math.min(H - pad.t - pad.b + 6, h(density * total * width))}`;
+        }).join(" ")
+      : null;
+  const refs = [
+    lsl != null && { v: lsl, l: "LSL", color: LIMIT, dash: "" },
+    usl != null && { v: usl, l: "USL", color: LIMIT, dash: "" },
+    proposed?.lsl != null && proposed.lsl !== lsl && { v: proposed.lsl, l: "New LSL", color: PROPOSED, dash: "5 3" },
+    proposed?.usl != null && proposed.usl !== usl && { v: proposed.usl, l: "New USL", color: PROPOSED, dash: "5 3" },
+  ].filter(Boolean) as { v: number; l: string; color: string; dash: string }[];
 
   return (
     <div className="relative">
@@ -304,22 +344,95 @@ export function Histogram({ bins, lsl, usl, unit, height = 160, ariaLabel }: { b
             </g>
           );
         })}
+        {curve && <polyline points={curve} fill="none" stroke={INK.secondary} strokeWidth="1.25" strokeOpacity="0.7" pointerEvents="none" />}
+        {refs.map(({ v, l, color, dash }, i) => (
+          <g key={l} pointerEvents="none">
+            <line x1={x(v)} x2={x(v)} y1={pad.t} y2={base} stroke={color} strokeWidth="1.5" strokeDasharray={dash} />
+            {/* Proposed labels sit at the top so they don't collide with the current ones. */}
+            <text x={x(v)} y={dash ? pad.t + 8 : H - 6} dx={dash ? (i % 2 ? -4 : 4) : 0} textAnchor={dash ? (l.endsWith("LSL") ? "end" : "start") : "middle"} fontSize="10" fill={dash ? color : INK.secondary}>
+              {l} {fmt(v)}
+            </text>
+          </g>
+        ))}
+      </svg>
+      <Tooltip
+        width={W}
+        tip={hover == null ? null : { x: x((bins[hover].from + bins[hover].to) / 2), y: ((base - h(bins[hover].count)) / H) * height, lines: [`${fmt(bins[hover].from)} to ${fmt(bins[hover].to)} ${unit}`, `${bins[hover].count} units`] }}
+      />
+      {(curve || refs.some((r) => r.dash)) && (
+        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs text-zinc-600">
+          <span className="flex items-center gap-1.5"><span className="h-px w-3 bg-[#e34948]" />Current limits</span>
+          {refs.some((r) => r.dash) && <span className="flex items-center gap-1.5"><span className="h-px w-3 border-t border-dashed border-[#6250d6]" />Proposed limits</span>}
+          {curve && <span className="flex items-center gap-1.5"><span className="h-px w-3 bg-[#52514e]" />Normal fit</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Interval plot ----------------------------------------------------------------------
+
+/**
+ * Mean ± 3σ per group (station, shift, lot) on one axis with the spec limits,
+ * so an offset or a wider spread stands out. `highlight` marks the group being
+ * looked at.
+ */
+export function IntervalPlot({ rows, lsl, usl, unit, highlight, ariaLabel }: { rows: { label: string; mean: number; sd: number; n: number }[]; lsl: number | null; usl: number | null; unit: string; highlight?: string; ariaLabel: string }) {
+  const [hover, setHover] = useState<number | null>(null);
+  if (!rows.length) return null;
+  const W = 640;
+  const rowH = 26;
+  const pad = { l: 132, r: 16, t: 6, b: 22 };
+  const H = pad.t + rows.length * rowH + pad.b;
+  const vals = rows.flatMap((r) => [r.mean - 3 * r.sd, r.mean + 3 * r.sd]);
+  const lo = Math.min(...vals, lsl ?? Infinity);
+  const hi = Math.max(...vals, usl ?? -Infinity);
+  const span = hi - lo || 1;
+  const x0 = lo - span * 0.05;
+  const x1 = hi + span * 0.05;
+  const x = (v: number) => pad.l + ((v - x0) / (x1 - x0)) * (W - pad.l - pad.r);
+  const yOf = (i: number) => pad.t + i * rowH + rowH / 2;
+
+  return (
+    <div className="relative">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={ariaLabel} onMouseLeave={() => setHover(null)}>
+        {ticks(x0, x1, 5).map((g) => (
+          <g key={g}>
+            <line x1={x(g)} x2={x(g)} y1={pad.t} y2={H - pad.b} stroke={INK.grid} />
+            <text x={x(g)} y={H - 6} textAnchor="middle" fontSize="10" fill={INK.muted}>
+              {fmt(g)}
+            </text>
+          </g>
+        ))}
         {[lsl != null && { v: lsl, l: "LSL" }, usl != null && { v: usl, l: "USL" }].filter(Boolean).map((r) => {
           const { v, l } = r as { v: number; l: string };
+          return <line key={l} x1={x(v)} x2={x(v)} y1={pad.t} y2={H - pad.b} stroke={LIMIT} strokeWidth="1.5" />;
+        })}
+        {rows.map((r, i) => {
+          const on = r.label === highlight;
+          const color = on ? "#1a1a1a" : "#2a78d6";
           return (
-            <g key={l}>
-              <line x1={x(v)} x2={x(v)} y1={pad.t} y2={base} stroke={LIMIT} strokeWidth="1.5" />
-              <text x={x(v)} y={H - 6} textAnchor="middle" fontSize="10" fill={INK.secondary}>
-                {l} {fmt(v)}
+            <g key={r.label} onMouseEnter={() => setHover(i)}>
+              <rect x={0} y={yOf(i) - rowH / 2} width={W} height={rowH} fill={hover === i ? "#f6f6f5" : "transparent"} />
+              <text x={pad.l - 10} y={yOf(i)} dy="0.32em" textAnchor="end" fontSize="11" fill={on ? INK.primary : INK.secondary} fontWeight={on ? 600 : 400}>
+                {r.label.length > 20 ? `${r.label.slice(0, 19)}…` : r.label}
               </text>
+              <line x1={x(r.mean - 3 * r.sd)} x2={x(r.mean + 3 * r.sd)} y1={yOf(i)} y2={yOf(i)} stroke={color} strokeWidth="2" strokeLinecap="round" strokeOpacity={0.45} />
+              <line x1={x(r.mean - r.sd)} x2={x(r.mean + r.sd)} y1={yOf(i)} y2={yOf(i)} stroke={color} strokeWidth="5" strokeLinecap="round" />
+              <circle cx={x(r.mean)} cy={yOf(i)} r="4.5" fill="#fff" stroke={color} strokeWidth="2" />
             </g>
           );
         })}
       </svg>
       <Tooltip
         width={W}
-        tip={hover == null ? null : { x: x((bins[hover].from + bins[hover].to) / 2), y: ((base - h(bins[hover].count)) / H) * height, lines: [`${fmt(bins[hover].from)} to ${fmt(bins[hover].to)} ${unit}`, `${bins[hover].count} units`] }}
+        tip={hover == null ? null : { x: x(rows[hover].mean), y: yOf(hover) - 6, lines: [rows[hover].label, `mean ${fmt(rows[hover].mean)} ${unit} · σ ${fmt(rows[hover].sd)}`, `${rows[hover].n} results`] }}
       />
+      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs text-zinc-600">
+        <span className="flex items-center gap-1.5"><span className="h-1.5 w-3 rounded-full bg-[#2a78d6]" />±1σ</span>
+        <span className="flex items-center gap-1.5"><span className="h-0.5 w-3 rounded-full bg-[#2a78d6] opacity-50" />±3σ</span>
+        <span className="flex items-center gap-1.5"><span className="h-px w-3 bg-[#e34948]" />Spec limits</span>
+      </div>
     </div>
   );
 }

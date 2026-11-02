@@ -98,6 +98,7 @@ const show = (v: unknown): string => {
   if (typeof v === "boolean") return v ? "yes" : "no";
   if (typeof v === "object") {
     const o = v as Record<string, unknown>;
+    if ("lsl" in o || "usl" in o) return `${show(o.lsl)} to ${show(o.usl)}`;
     if ("mean" in o || "sd" in o) return `mean ${show(o.mean)}, σ ${show(o.sd)}`;
     if ("calibrated_at" in o || "calibration_due" in o) return `calibrated ${show(o.calibrated_at)}, due ${show(o.calibration_due)}`;
     return JSON.stringify(v);
