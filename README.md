@@ -79,8 +79,7 @@ is suggest-only) and notifies the organization's channels.
 ## Clerk
 
 - Turn on **Organizations** and make them required: every FIXT workspace is an organization.
-- Sign-up mode **Public** lets anyone create an account with Google. Set it to **Restricted** to
-  make FIXT invite-only again (Google then only signs in existing users).
+- Access mode **Invite-only** is recommended (as in BRIX).
 
 ## Tests
 
